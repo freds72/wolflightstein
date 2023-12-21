@@ -1,4 +1,5 @@
-local _grid=setmetatable({},
+function autoarray(t)
+	return setmetatable(t or {},
 	{
 		-- auto create array
 		__index=function(t,k)
@@ -7,6 +8,9 @@ local _grid=setmetatable({},
 			return v
 		end
 	})
+end
+
+local _grid=autoarray()
 local _lights={}
 
 function make_cam(x,y,a)
@@ -60,7 +64,7 @@ local function v_normz(v)
 	return v,0
 end
 
-local actors={}
+local _actors={}
 local cam
 
 local _walls={}
@@ -78,11 +82,11 @@ for i=32,39 do
 	_wall_by_id[fget(i)]=i
 end
 
-function draw_walls(walls)
-		for w in all(walls) do
-			local a,b=unpack(w)
-			line(a[1],a[2],b[1],b[2],11)
-		end
+function draw_walls(walls,xshift,yshift)
+	for w in all(walls) do
+		local a,b=unpack(w)
+		line(a[1]-xshift,a[2]-yshift,b[1]-xshift,b[2]-yshift,11)
+	end
 end
 
 function v_tostr(a)
@@ -128,12 +132,12 @@ function scan(walls,start,min_ij,max_ij,id,mask,n,side)
 	local n_offset={0,0}
 	if(sgn(n[1])==-1 or sgn(n[2])==-1) n_offset=v_scale(n,-1)
 	local a,b=v_add(origin,extents[-1],8),v_add(origin,extents[1],8)
-	a=v_add(a,n_offset,7)
-	b=v_add(b,n_offset,7)
+	a=v_add(a,n_offset,8)
+	b=v_add(b,n_offset,8)
 	local a_offset,b_offset={0,0},side
 	if(sgn(side[1])==-1 or sgn(side[2])==-1) a_offset,b_offset=side,{0,0}
 	add(walls,{
-		v_add(a,a_offset,-7),v_add(b,b_offset,7),
+		v_add(a,a_offset,-8),v_add(b,b_offset,8),
 		n=n,
 		cp=v_dot(a,n)
 	})
@@ -141,7 +145,11 @@ end
 
 function _init()
 	tline(17)	
-
+	poke(0x5f36,1)
+	poke(0x5f54,0x60,0x00)
+	memcpy(0x0,0x6000,0x2000)
+	_map_display(0)
+	
 	local normals={
 		[1]={-1,0},
 		[2]={0,-1},
@@ -161,7 +169,18 @@ function _init()
 			poke(mem,id)
 			mem+=1
 			if id==4 then
-				add(_lights,{pos={i+0.5,j+0.5},radius=64})			
+				local i,j=i,j
+				local actor={
+					pos={i+1,j+1},
+					sx=56,sy=0,radius=24,
+					update=function(self)
+						local t=time()/4
+						self.pos={i+1+0.5*cos(t),j+1+0.5*sin(t)}
+						return true
+					end
+				}
+				add(_lights,actor)			
+				add(_actors,actor)
 			elseif id==1 then
 				-- player starting pos
 				cam=make_cam(i+0.5,j+0.5,0)
@@ -178,6 +197,11 @@ function _init()
 		end
 	end
 	
+	for i=0,15 do
+		for j=0,15 do
+			mset(32+i,j,i+j*16)
+		end
+	end
 end
 
 function solid(x,y)
@@ -216,7 +240,7 @@ function _update()
 	cam.pos={x+du,y+dv}
 	
 	if btnp(🅾️) then
-		add(actors,{
+		add(_actors,{
 			pos={cam.pos[1],cam.pos[2]},
 			ttl=45+rnd(15),
 			sx=56,
@@ -234,9 +258,9 @@ function _update()
 		})
 	end
 	
-	for _,a in pairs(actors) do
+	for _,a in pairs(_actors) do
 		if a.update and not a:update() then
-			del(actors,a)
+			del(_actors,a)
 		end
 	end
 end
@@ -308,9 +332,7 @@ function rot_inv(p,a)
 end
 
 function _draw()
- rectfill(0,0,127,64,12)
- rectfill(0,64,127,127,5)
- 
+ cls(5)
  palt(0,false)
 
  --
@@ -346,23 +368,25 @@ function _draw()
    local dv=(2<<4)/h
    local err=flr(dy)-dy
    -- scale u by 16
-   add(do_later,function() tline(i,dy,i,63.5+h/2,(mx+(tx%2))<<4,err*dv,0,dv) end)
+   add(do_later,function() 
+		tline(i,dy,i,63.5+h/2,(mx+(tx%2))<<4,err*dv,0,dv) 
+		end)
   end
  end 	
  local done={}	
  for k,dist in pairs(tiles) do
- 	local i,j=k&31,k\32 	
+ 	local i,j=k&31,k\32
 	i\=16
  	j\=16
- 	local k=i>>16|j
- 	if not done[k] then
- 	 	done[k]=true
+ 	local grid_id=i+2*j
+ 	if not done[grid_id] then
+ 	 	done[grid_id]=true
 	 	local x0,y0=i*512-cx*32,j*512-cy*32
 	 	local verts={
 	 	 {x0,y0,u=i,v=j},
 	 	 {x0+512,y0,u=i+16-0x0.0001,v=j},
-	 	 {x0+512,y0+512,u=i+16-0x0.0001,v=j+16-0x0.0001},
-	 	 {x0,y0+512,u=i,v=j+16-0x0.0001}}
+	 	 {x0+512,y0+512,u=i+16-0x0.0001,v=j+16},
+	 	 {x0,y0+512,u=i,v=j+16}}
 	 	local clip
 		 local znear=4
 	
@@ -375,6 +399,7 @@ function _draw()
 				p.w=w
 				p.x=63.5+w*p[2]
 				p.y=63.5+w*16
+				-- shift to match tline additional precision
 				p.u=v.u<<4
 				p.v=v.v<<4
 			end
@@ -403,9 +428,44 @@ function _draw()
 				verts=res
 			end		
 			
-			poke4(0x5f38,0x0020.0808)
+			_map_display(1)
+			poke(0x5f54,0x00,0x60)
+			cls()
+			local mask=0b00010001
+			for a in all(_lights) do
+				local grids,r,x,y=autoarray(),a.radius/8,unpack(a.pos)
+				for i=max((x-r)\16),min((x+r)\16,31) do
+					for j=max((y-r)\16),min((y+r)\16,31) do
+						add(grids[i+2*j],a)
+					end
+				end
+				for a in all(grids[grid_id]) do
+					poke(0x5f5e,mask)
+					collect_light(_walls,a.pos[1]*8,a.pos[2]*8,a.radius,-i*128,-j*128-1)
+					
+					mask<<=1
+				end
+			end
+			poke(0x5f5e,0xff)
+			fillp(0x33cc.8)
+			rectfill(0,0,127,127,0xf0)
+			fillp()
+			poke(0x5f54,0x60,0x00)
+			
+			poke4(0x5f38,0x0020.1010)
+			for i=1,15 do
+				pal(i,1)
+			end
+			pal(8,1)			
+			palt(0,false)
 			mode7(verts,#verts,i+j)
+			if(btn(5)) for i=1,10 do flip() end
+			--sspr(0,0,128,128,64*i,64*j,64,64)
+			pal()
+			_map_display(0)
+
    		--polyfill(verts,cam.pos,cam.angle,-16,0,1)			
+			--[[
 			local p0=verts[#verts]
 			for i=1,#verts do
 			local p1=verts[i]
@@ -415,30 +475,33 @@ function _draw()
 						8)
 					p0=p1
 			end
-
+			]]
 		end
- 	--pset(mx+i,j,6)
+ 	--pset(mx+i,j,6)	 
  end
  
+ --reload()
  poke4(0x5f38,0x001c.0202)
  for fn in all(do_later) do
   fn()
+	if(btn(5)) flip()
  end
 
  -- actors
  palt(14,true)
  local drawables={}
- for _,a in pairs(actors) do
+ for _,a in pairs(_actors) do
   -- visible?
   if tiles[flr(a.pos[1])+32*flr(a.pos[2])] then
 	  local p=rot_inv({a.pos[1]-cam.pos[1],a.pos[2]-cam.pos[2]},cam.angle)
 	  if p[1]>0.1 then
 		  local w=64/p[1]
 	  	add(drawables,{
+				info=a.pos[1].." "..a.pos[2].."\nid:"..((a.pos[1]\16)+2*(a.pos[2]\16)),
 	  		x=64+w*p[2],
 	  		depth=p[1],
 	  		sx=a.sx,
-	  		key=-64/p[1],})
+	  		key=-64/p[1]})
 	  end
 	 end
  end
@@ -453,15 +516,56 @@ function _draw()
   -- clip sprite start to 0
   if(x0<0) x0,sx=0,sx-dsx*x0
   for dx=flr(x0),min(127,flr(a.x+w/2)-1) do
-			-- get wall distance
-			local z=zbuf[dx] or 32000
-			-- is slice visible
-			if z>a.depth then
-				sspr(sx,0,1,8,dx,64-w/2,1,w)
-			end
-		 sx+=dsx
+		-- get wall distance
+		local z=zbuf[dx] or 32000
+		-- is slice visible
+		if z>a.depth then
+			sspr(sx,0,1,8,dx,64-w/2,1,w)
 		end
+		sx+=dsx
+	end
+	--print(a.info,x0,64-w,8)
  end
- palt()
 
+ palt()
+ print("grid:"..(cam.pos[1]\16).." "..(cam.pos[2]\16))
 end
+
+function collect_light(walls,x0,y0,r0,xshift,yshift)
+	x0+=xshift
+	y0+=yshift
+	clip(x0-r0+1,y0-r0+1,2*r0,2*r0)
+	rectfill(0,0,127,127,15)
+	local ymin,ymax=max((y0-r0)\1),min((y0+r0)\1,127)
+	
+	local shift={xshift,yshift}
+	for _,w in next,walls do
+	 -- backfacing?
+	 local w0,w1=v_add(w[1],shift),v_add(w[2],shift)
+	 local n0={
+			 w0[1]-x0,
+			 w0[2]-y0}
+	 if v_dot(n0,w.n)<r0 and v_dot({x0,y0},w.n)<w.cp then
+		 local n0=v_normz(n0)	
+		 local n1=v_normz({
+			 w1[1]-x0,
+			 w1[2]-y0}) 	
+		 local w11=v_add(w0,n0,128)
+		 local w22=v_add(w1,n1,128)
+		 polyfill({w0,w1,w22,w11},4,0,ymin,ymax)
+	 end
+	end
+ 
+	-- remove outside light sphere
+	camera(-x0,-y0)
+	color(0)
+	local rr=r0*r0
+	for y=-r0-1,r0+1 do 
+	 local x=sqrt(rr-y*y)-0x0.0001
+	 rectfill(-r0,y,-x,y)
+	 rectfill(x,y,r0,y)
+	end
+	camera() 
+	
+	clip()
+ end
