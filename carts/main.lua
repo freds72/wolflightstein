@@ -306,17 +306,17 @@ function wallhit(posx,posy,u,v,out)
 		else
 			disty+=ddy
 			mapy+=mapdy
-			side=2
+			side=v<0 and 2 or 4
 		end		
 		local k=mapx|mapy<<5
 		if @(0x8000|k)==2 then
 			local len=0
-			if side!=2 then
+			if side<2 then
 				len=(mapx-posx+(1-mapdx)/2)/u
 			else
 				len=(mapy-posy+(1-mapdy)/2)/v			
 			end
-			return true,mapx,mapy,side,len
+			return true,mapx,mapy,side,len,(mapx\16)+2*(mapy\16)
 		end
 		-- non solid visible tiles
 		if (mapx|mapy)&0xffe0==0 then
@@ -338,7 +338,7 @@ function _draw()
  --
 	local tiles={}
 	local zbuf={}
-	local do_later={}
+	local do_later=autoarray()
 	local cx,cy=unpack(cam.pos)
  for i=0,127 do
  	local angle=angles[i]
@@ -347,14 +347,13 @@ function _draw()
  	--[[
 		local hit,x1,y1,leftright=lineofsight(cam.pos[1],cam.pos[2],cam.pos[1]+10*u,cam.pos[2]+10*v,10) 
 		]]
-		local hit,x1,y1,side,dist,tx=wallhit(cx,cy,u,v,tiles)
-		
+		local hit,x1,y1,side,dist,tileid,tx=wallhit(cx,cy,u,v,tiles)
   -- 
  	if hit==true then
 			local h=dists[i]/dist
   	zbuf[i]=dist
   	local sx,mx=16,0
-  	if side!=2 then
+  	if side<2 then
    	tx=2*(v*dist+cy)
    	sx+=8  
    	--mx+=2  
@@ -368,8 +367,18 @@ function _draw()
    local dv=(2<<4)/h
    local err=flr(dy)-dy
    -- scale u by 16
-   add(do_later,function() 
-		tline(i,dy,i,63.5+h/2,(mx+(tx%2))<<4,err*dv,0,dv) 
+	 local walls=do_later[tileid]	 
+   add(walls,function(xshift,yshift) 
+		--tline(i,dy,i,63.5+h/2,(mx+(tx%2))<<4,err*dv,0,dv) 
+		--rect(x1*8,y1*8,x1*8+7,y1*8+7,2)
+		local pct,tx,ty=8*((tx/2)&0x0.ffff)
+		if(side==0) tx,ty=x1*8,y1*8+pct
+		if(side==1) tx,ty=x1*8+8,y1*8+pct
+		if(side==2) tx,ty=x1*8+pct,y1*8+8
+		if(side==4) tx,ty=x1*8+pct,y1*8
+		tx+=xshift
+		ty+=yshift
+		rectfill(i,dy,i,63.5+h/2,sget(tx,ty))
 		end)
   end
  end 	
@@ -447,23 +456,37 @@ function _draw()
 				end
 			end
 			poke(0x5f5e,0xff)
-			fillp(0x33cc.8)
-			rectfill(0,0,127,127,0xf0)
-			fillp()
+			-- todo: map to "kill" wall colors
+			--fillp(0x33cc.8)
+			--rectfill(0,0,127,127,0xf0)
+			--fillp()
 			poke(0x5f54,0x60,0x00)
 			
 			poke4(0x5f38,0x0020.1010)
 			for i=1,15 do
 				pal(i,1)
 			end
-			pal(8,1)			
 			palt(0,false)
+			-- draw including sprite 0
+			poke(0x5f36, 0x9)
 			mode7(verts,#verts,i+j)
+			poke(0x5f36, 0x1)
 			if(btn(5)) for i=1,10 do flip() end
 			--sspr(0,0,128,128,64*i,64*j,64,64)
 			pal()
-			_map_display(0)
 
+			--_map_display(0)
+			--poke4(0x5f38,0x001c.0202)
+			for i=1,15 do
+				pal(i,2)
+			end
+			for fn in all(do_later[grid_id]) do
+			 fn(-i*128,-j*128-1)
+			 if(btn(5)) flip()
+			end
+			pal()
+			_map_display(0)
+		 		 
    		--polyfill(verts,cam.pos,cam.angle,-16,0,1)			
 			--[[
 			local p0=verts[#verts]
@@ -478,13 +501,6 @@ function _draw()
 			]]
 		end
  	--pset(mx+i,j,6)	 
- end
- 
- --reload()
- poke4(0x5f38,0x001c.0202)
- for fn in all(do_later) do
-  fn()
-	if(btn(5)) flip()
  end
 
  -- actors
@@ -564,8 +580,8 @@ function collect_light(walls,x0,y0,r0,xshift,yshift)
 	 local x=sqrt(rr-y*y)-0x0.0001
 	 rectfill(-r0,y,-x,y)
 	 rectfill(x,y,r0,y)
-	end
+	end	
 	camera() 
-	
+	circfill(x0+0.5,y0+0.5,r0/12,0)
 	clip()
  end
